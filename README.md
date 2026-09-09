@@ -86,24 +86,17 @@ python kt_transcribe.py "recording.mp4" \
   --term "document-processing-service"
 ```
 
-## 4. Speaker identification
+## 4. Hugging Face token and speaker identification
 
 `pyannote/speaker-diarization-community-1` requires a free Hugging Face account,
-accepting the model's user conditions, and an access token for the initial download.
+accepting the model's user conditions, and an access token for the initial model download.
 
-Set the token as an environment variable rather than putting it in shell history.
+The token is read automatically from a local `.env` file next to `kt_transcribe.py`.
+There is intentionally no CLI option for passing the token.
 
-PowerShell:
-
-```powershell
-$env:HF_TOKEN="hf_..."
-python kt_transcribe.py "recording.mp4" --diarize
-```
-
-Linux/macOS:
+Once configured, speaker diarization needs no additional token arguments:
 
 ```bash
-export HF_TOKEN="hf_..."
 python kt_transcribe.py "recording.mp4" --diarize
 ```
 
@@ -169,6 +162,7 @@ python kt_transcribe.py "recording.mp4" \
 
 ## Notes
 
+- `.env` is loaded automatically with `python-dotenv` from the directory containing `kt_transcribe.py`.
 - The original recording is never modified.
 - The script does not send the video to an external transcription API.
 - Model files are downloaded on first use and cached locally.

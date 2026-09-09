@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from dotenv import load_dotenv
+
 
 LOG = logging.getLogger("kt-transcriber")
 
@@ -433,7 +435,7 @@ def diarize_audio(
         raise RuntimeError(
             "Speaker diarization needs a Hugging Face token the first time the "
             "Community-1 model is downloaded.\n"
-            "Pass --hf-token TOKEN or set HF_TOKEN / HUGGINGFACE_TOKEN.\n"
+            "Set HF_TOKEN in the .env file next to kt_transcribe.py.\n"
             "Also accept the model's user conditions on Hugging Face first."
         )
 
@@ -906,11 +908,6 @@ def build_parser() -> argparse.ArgumentParser:
         default="pyannote/speaker-diarization-community-1",
         help="Hugging Face model name or local model directory",
     )
-    parser.add_argument(
-        "--hf-token",
-        default=None,
-        help="Hugging Face token; otherwise HF_TOKEN/HUGGINGFACE_TOKEN is used",
-    )
     parser.add_argument("--num-speakers", type=int, default=None)
     parser.add_argument("--min-speakers", type=int, default=None)
     parser.add_argument("--max-speakers", type=int, default=None)
@@ -949,6 +946,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    env_path = Path(__file__).resolve().parent / ".env"
+    load_dotenv(dotenv_path=env_path, override=False)
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -1025,11 +1025,7 @@ def main() -> int:
 
         turns: list[dict[str, Any]] = []
         if args.diarize:
-            hf_token = (
-                args.hf_token
-                or os.getenv("HF_TOKEN")
-                or os.getenv("HUGGINGFACE_TOKEN")
-            )
+            hf_token = os.getenv("HF_TOKEN")
             turns = diarize_audio(
                 audio_path,
                 model_name=args.diarization_model,
