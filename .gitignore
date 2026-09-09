@@ -219,3 +219,9 @@ __marimo__/
 
 # Technical terms
 technical_terms.txt
+
+# Transcripts folder
+transcripts/
+
+#MP4 files
+*.mp4
