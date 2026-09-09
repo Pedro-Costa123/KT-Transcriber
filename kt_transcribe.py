@@ -35,6 +35,84 @@ from dotenv import load_dotenv
 
 LOG = logging.getLogger("kt-transcriber")
 
+# Keep AddDllDirectory handles alive for the lifetime of the process on Windows.
+_WINDOWS_DLL_DIR_HANDLES: list[Any] = []
+
+
+def configure_windows_cuda_dll_search() -> list[Path]:
+    """
+    Add CUDA runtime directories installed by NVIDIA pip wheels to Windows'
+    DLL search path before CTranslate2/pyannote/PyTorch load native libraries.
+
+    This makes a project-local virtualenv sufficient for faster-whisper GPU
+    execution; a system-wide CUDA Toolkit installation is not required.
+    """
+    if os.name != "nt":
+        return []
+
+    candidates = [
+        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin",
+        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cudnn" / "bin",
+        Path(sys.prefix) / "Lib" / "site-packages" / "nvidia" / "cuda_runtime" / "bin",
+    ]
+    found = [path for path in candidates if path.is_dir()]
+    if not found:
+        return []
+
+    # Native dependencies loaded later by CTranslate2 use the process DLL
+    # search path. Prepend the wheel directories to PATH and also register
+    # them with Python's Windows DLL directory API.
+    current_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join(str(p) for p in found) + os.pathsep + current_path
+
+    if hasattr(os, "add_dll_directory"):
+        for directory in found:
+            try:
+                _WINDOWS_DLL_DIR_HANDLES.append(os.add_dll_directory(str(directory)))
+            except OSError:
+                pass
+
+    return found
+
+
+def find_windows_dll(name: str) -> Optional[Path]:
+    if os.name != "nt":
+        return None
+
+    for raw_dir in os.environ.get("PATH", "").split(os.pathsep):
+        if not raw_dir:
+            continue
+        try:
+            candidate = Path(raw_dir.strip('"')) / name
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
+def validate_windows_cuda_runtime(device: str) -> None:
+    """Fail early with an actionable message when CUDA 12 DLLs are absent."""
+    if os.name != "nt" or device != "cuda":
+        return
+
+    required = ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn64_9.dll")
+    missing = [name for name in required if find_windows_dll(name) is None]
+    if not missing:
+        return
+
+    raise RuntimeError(
+        "CUDA GPU mode was selected, but required CUDA 12/cuDNN 9 DLLs "
+        f"are missing: {', '.join(missing)}\n\n"
+        "Activate this project's virtual environment and run:\n"
+        "  python -m pip install -U nvidia-cublas-cu12 nvidia-cudnn-cu12\n\n"
+        "Then close/reopen the terminal (or reactivate the venv) and run the "
+        "transcriber again. The script automatically adds the installed "
+        "nvidia\\cublas\\bin and nvidia\\cudnn\\bin directories to "
+        "the Windows DLL search path.\n\n"
+        "To run without NVIDIA GPU acceleration instead, use: --device cpu"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Generic helpers
@@ -971,6 +1049,13 @@ def main() -> int:
             "--num-speakers cannot be combined with --min-speakers/--max-speakers"
         )
 
+    cuda_dll_dirs = configure_windows_cuda_dll_search()
+    if cuda_dll_dirs:
+        LOG.info(
+            "Configured Windows CUDA DLL directories: %s",
+            "; ".join(str(p) for p in cuda_dll_dirs),
+        )
+
     stem = source.stem
     out_dir = (
         args.output_dir.expanduser().resolve()
@@ -983,6 +1068,7 @@ def main() -> int:
     title = args.title or f"KT Transcript — {stem}"
 
     device = resolve_device(args.device)
+    validate_windows_cuda_runtime(device)
     compute_type = resolve_compute_type(device, args.compute_type)
 
     terms = load_terms(args.terms, args.term)

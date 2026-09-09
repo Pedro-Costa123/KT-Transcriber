@@ -35,6 +35,11 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+On Windows, `requirements.txt` also installs the CUDA 12 cuBLAS and cuDNN 9
+runtime DLLs needed by `faster-whisper`/CTranslate2. The script automatically
+adds their virtualenv `bin` folders to the process DLL search path. You do not
+need to install the full CUDA Toolkit just for this project.
+
 For speaker diarization:
 
 ```powershell
@@ -152,6 +157,8 @@ python kt_transcribe.py "recording.mp4" \
 python kt_transcribe.py "recording.mp4" \
   --model distil-large-v3
 ```
+
+Transcription language is permanently fixed to English (`en`) in the script. There is no language CLI option.
 
 ### No speakers
 
