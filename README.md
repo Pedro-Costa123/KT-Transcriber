@@ -150,11 +150,23 @@ python -m pip uninstall -y torch
 python -m pip install -U -r requirements-diarization-nvidia.txt
 ```
 
-Verify CUDA is visible to PyTorch:
+The NVIDIA requirements use the PyTorch **CUDA 13.0 (`cu130`)** build. This is
+important for RTX 50-series / Blackwell GPUs such as the RTX 5060, whose
+compute capability is `sm_120`. Older `cu126` PyTorch wheels can detect these
+GPUs while still lacking executable kernels for `sm_120`.
+
+The CUDA version used here is for **PyTorch/pyannote only**. `faster-whisper`
+uses CTranslate2 and its own CUDA 12 runtime packages, so the two runtimes can
+coexist in the same virtual environment.
+
+Verify CUDA is visible **and that the wheel supports the GPU architecture**:
 
 ```powershell
-python -c "import torch; print('torch:', torch.__version__); print('CUDA build:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+python -c "import torch; print('torch:', torch.__version__); print('CUDA build:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'); print('Capability:', torch.cuda.get_device_capability(0) if torch.cuda.is_available() else 'none'); print('Architectures:', torch.cuda.get_arch_list() if torch.cuda.is_available() else [])"
 ```
+
+For an RTX 5060, the capability should be `(12, 0)` and the architecture list
+must include `sm_120`.
 
 Then run normally:
 
@@ -162,7 +174,10 @@ Then run normally:
 python kt_transcribe.py "recording.mp4" --diarize
 ```
 
-With `auto`, the log will state whether pyannote is using `cuda` or `cpu`.
+With `auto`, the script checks both CUDA availability and whether the installed
+PyTorch wheel contains kernels for the detected GPU architecture. If CUDA can
+see the GPU but the wheel does not support its architecture, diarization safely
+falls back to CPU instead of failing later during a CUDA kernel launch.
 
 ## 5. Useful presets
 

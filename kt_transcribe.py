@@ -524,17 +524,56 @@ def diarize_audio(
 
     # Diarization acceleration is independent from faster-whisper/CTranslate2.
     # This keeps the script portable: macOS uses CPU, while Windows machines with a CUDA-enabled
-    # PyTorch build can use NVIDIA.
+    # PyTorch build can use NVIDIA when the wheel supports the GPU architecture.
     torch_cuda_available = bool(torch.cuda.is_available())
+    cuda_arch_supported = False
+    gpu_name = None
+    gpu_cc = None
+    torch_arches: list[str] = []
+
+    if torch_cuda_available:
+        try:
+            gpu_name = torch.cuda.get_device_name(0)
+            major, minor = torch.cuda.get_device_capability(0)
+            gpu_cc = f"sm_{major}{minor}"
+            torch_arches = list(torch.cuda.get_arch_list())
+            cuda_arch_supported = gpu_cc in torch_arches
+        except Exception as exc:
+            LOG.warning("Could not validate PyTorch CUDA architecture support: %s", exc)
+
     requested = diarization_device.lower()
     if requested == "auto":
-        diar_device = "cuda" if torch_cuda_available else "cpu"
+        if torch_cuda_available and cuda_arch_supported:
+            diar_device = "cuda"
+        else:
+            diar_device = "cpu"
+            if torch_cuda_available and gpu_cc and not cuda_arch_supported:
+                LOG.warning(
+                    "PyTorch can see GPU '%s' (%s), but this PyTorch CUDA wheel "
+                    "does not include kernels for that architecture. "
+                    "Falling back to CPU for diarization.",
+                    gpu_name or "unknown",
+                    gpu_cc,
+                )
     elif requested == "cuda":
         if not torch_cuda_available:
             raise RuntimeError(
                 "--diarization-device cuda was requested, but this PyTorch build "
                 "cannot access CUDA. Install a CUDA-enabled PyTorch build on a "
                 "Windows NVIDIA machine, or use --diarization-device cpu."
+            )
+        if not cuda_arch_supported:
+            raise RuntimeError(
+                "--diarization-device cuda was requested, but the installed "
+                f"PyTorch build does not support this GPU architecture ({gpu_cc or 'unknown'}).\n"
+                f"GPU: {gpu_name or 'unknown'}\n"
+                f"PyTorch: {torch.__version__}\n"
+                f"PyTorch CUDA build: {getattr(torch.version, 'cuda', None) or 'none'}\n"
+                f"Architectures in this wheel: {', '.join(torch_arches) or 'unknown'}\n"
+                "For RTX 50-series / Blackwell GPUs on Windows, install the "
+                "project's CUDA 13 PyTorch requirements:\n"
+                "  python -m pip uninstall -y torch\n"
+                "  python -m pip install -U -r requirements-diarization-nvidia.txt"
             )
         diar_device = "cuda"
     else:
@@ -550,10 +589,14 @@ def diarize_audio(
     )
 
     if torch_cuda_available:
-        try:
-            LOG.info("PyTorch CUDA GPU: %s", torch.cuda.get_device_name(0))
-        except Exception:
-            pass
+        LOG.info(
+            "PyTorch CUDA GPU: %s | capability: %s | architecture supported: %s",
+            gpu_name or "unknown",
+            gpu_cc or "unknown",
+            cuda_arch_supported,
+        )
+        if torch_arches:
+            LOG.debug("PyTorch wheel CUDA architectures: %s", ", ".join(torch_arches))
 
     # Apple Silicon may expose PyTorch MPS, but pyannote's documented acceleration
     # path is CUDA. Keep macOS on CPU for predictable cross-platform behavior.
