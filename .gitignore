@@ -223,5 +223,7 @@ technical_terms.txt
 # Transcripts folder
 transcripts/
 
-#MP4 files
+#MP4 / MKV / MOV files
 *.mp4
+*.mkv
+*.mov
