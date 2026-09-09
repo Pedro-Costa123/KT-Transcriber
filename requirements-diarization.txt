@@ -1,2 +1,3 @@
 # Install this in addition to requirements.txt when using --diarize
 pyannote.audio>=4.0.0
+soundfile>=0.13.1

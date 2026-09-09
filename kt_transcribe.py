@@ -500,6 +500,7 @@ def diarize_audio(
     max_speakers: Optional[int],
 ) -> list[dict[str, Any]]:
     try:
+        import soundfile as sf
         import torch
         from pyannote.audio import Pipeline
         from pyannote.audio.pipelines.utils.hook import ProgressHook
@@ -534,8 +535,41 @@ def diarize_audio(
         if max_speakers is not None:
             kwargs["max_speakers"] = max_speakers
 
+    # pyannote.audio 4 uses TorchCodec when it receives a file path.
+    # TorchCodec requires a shared-library FFmpeg build on Windows and can be
+    # fragile across PyTorch/FFmpeg combinations. We already have a clean mono
+    # 16 kHz FLAC from the extraction stage, so load it ourselves and give
+    # pyannote the officially supported in-memory waveform mapping instead.
+    # This bypasses TorchCodec decoding completely and works cross-platform.
+    LOG.info("Loading extracted audio into memory for diarization...")
+    audio_samples, sample_rate = sf.read(
+        str(audio_path),
+        dtype="float32",
+        always_2d=True,
+    )
+
+    # soundfile returns (time, channels); pyannote expects (channels, time).
+    waveform = torch.from_numpy(audio_samples.T)
+    audio_input = {
+        "waveform": waveform,
+        "sample_rate": int(sample_rate),
+        "uri": audio_path.stem,
+    }
+
+    duration_seconds = waveform.shape[1] / float(sample_rate)
+    memory_mib = waveform.numel() * waveform.element_size() / (1024 * 1024)
+    LOG.info(
+        "Diarization audio loaded: %s, %.1f MiB in memory.",
+        format_hms(duration_seconds),
+        memory_mib,
+    )
+
     with ProgressHook() as hook:
-        output = pipeline(str(audio_path), hook=hook, **kwargs)
+        output = pipeline(audio_input, hook=hook, **kwargs)
+
+    # Pipeline output no longer needs the source waveform. Release it before
+    # building the final transcript structures.
+    del audio_input, waveform, audio_samples
 
     # Community-1 provides an exclusive diarization that is easier to reconcile
     # with transcription timestamps. Fall back to normal diarization if needed.
