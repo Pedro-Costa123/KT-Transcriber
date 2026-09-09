@@ -1108,6 +1108,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="pyannote/speaker-diarization-community-1",
         help="Hugging Face model name or local model directory",
     )
+    parser.add_argument(
+        "--diarization-device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help=(
+            "Device used by pyannote. 'auto' uses CUDA only when PyTorch "
+            "can access the GPU and the installed wheel supports its architecture; "
+            "otherwise it falls back to CPU."
+        ),
+    )
     parser.add_argument("--num-speakers", type=int, default=None)
     parser.add_argument("--min-speakers", type=int, default=None)
     parser.add_argument("--max-speakers", type=int, default=None)
