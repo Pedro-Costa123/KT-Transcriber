@@ -1,0 +1,6 @@
+# OPTIONAL: Windows NVIDIA acceleration for pyannote.
+# Install requirements-diarization.txt first.
+# This file deliberately contains only PyTorch so the CUDA wheel index does not
+# affect the rest of the project's cross-platform dependencies.
+--index-url https://download.pytorch.org/whl/cu126
+torch

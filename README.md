@@ -18,6 +18,8 @@ The temporary extracted FLAC is deleted unless `--keep-audio` is used.
 
 Python 3.10+ and FFmpeg.
 
+This project currently targets **Windows and macOS**.
+
 ### Windows
 
 Install FFmpeg using your preferred package manager, for example:
@@ -46,21 +48,29 @@ For speaker diarization:
 pip install -r requirements-diarization.txt
 ```
 
-### Linux
+### macOS
+
+macOS uses the same script and project files. CUDA/NVIDIA packages are not required.
+On Apple Silicon and Intel Macs, `faster-whisper` and pyannote fall back to CPU automatically.
+
+Install FFmpeg and create the virtual environment:
 
 ```bash
-sudo apt install ffmpeg
+brew install ffmpeg
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-For diarization:
+For speaker diarization:
 
 ```bash
 pip install -r requirements-diarization.txt
 ```
+
+The script intentionally does not force Apple MPS for pyannote. The documented pyannote
+GPU path is CUDA, so macOS stays on CPU for predictable compatibility.
 
 ## 2. Basic transcription
 
@@ -70,7 +80,7 @@ python kt_transcribe.py "recordings/KT Session.mp4"
 
 Default model is `large-v3`.
 
-The script automatically chooses:
+For Whisper/CTranslate2, the script automatically chooses:
 
 - NVIDIA CUDA available: `int8_float16`
 - otherwise: CPU `int8`
@@ -119,6 +129,40 @@ python kt_transcribe.py "recording.mp4" \
   --min-speakers 2 \
   --max-speakers 5
 ```
+
+
+### Optional NVIDIA GPU acceleration for pyannote
+
+Speaker diarization has its own device selection and is independent from Whisper:
+
+- `--diarization-device auto` (default) — CUDA when PyTorch can access an NVIDIA GPU, otherwise CPU
+- `--diarization-device cuda` — require CUDA and fail clearly if unavailable
+- `--diarization-device cpu` — always use CPU
+
+The normal `requirements-diarization.txt` remains cross-platform and is the correct setup
+for macOS and CPU-only machines.
+
+On a **Windows machine with an NVIDIA GPU**, replace the CPU PyTorch wheel with
+the CUDA wheel after installing the normal diarization requirements:
+
+```powershell
+python -m pip uninstall -y torch
+python -m pip install -U -r requirements-diarization-nvidia.txt
+```
+
+Verify CUDA is visible to PyTorch:
+
+```powershell
+python -c "import torch; print('torch:', torch.__version__); print('CUDA build:', torch.version.cuda); print('CUDA available:', torch.cuda.is_available()); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
+```
+
+Then run normally:
+
+```powershell
+python kt_transcribe.py "recording.mp4" --diarize
+```
+
+With `auto`, the log will state whether pyannote is using `cuda` or `cpu`.
 
 ## 5. Useful presets
 
@@ -170,6 +214,7 @@ python kt_transcribe.py "recording.mp4" \
 ## Notes
 
 - `.env` is loaded automatically with `python-dotenv` from the directory containing `kt_transcribe.py`.
+- Pyannote acceleration is auto-detected independently: NVIDIA CUDA on supported Windows setups, CPU on macOS.
 - The original recording is never modified.
 - The script does not send the video to an external transcription API.
 - Model files are downloaded on first use and cached locally.

@@ -22,6 +22,7 @@ import gc
 import json
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -494,7 +495,7 @@ def diarize_audio(
     *,
     model_name: str,
     hf_token: Optional[str],
-    device: str,
+    diarization_device: str,
     num_speakers: Optional[int],
     min_speakers: Optional[int],
     max_speakers: Optional[int],
@@ -521,7 +522,51 @@ def diarize_audio(
     LOG.info("Loading diarization model '%s'...", model_name)
     pipeline = Pipeline.from_pretrained(model_name, token=hf_token)
 
-    diar_device = "cuda" if device == "cuda" and torch.cuda.is_available() else "cpu"
+    # Diarization acceleration is independent from faster-whisper/CTranslate2.
+    # This keeps the script portable: macOS uses CPU, while Windows machines with a CUDA-enabled
+    # PyTorch build can use NVIDIA.
+    torch_cuda_available = bool(torch.cuda.is_available())
+    requested = diarization_device.lower()
+    if requested == "auto":
+        diar_device = "cuda" if torch_cuda_available else "cpu"
+    elif requested == "cuda":
+        if not torch_cuda_available:
+            raise RuntimeError(
+                "--diarization-device cuda was requested, but this PyTorch build "
+                "cannot access CUDA. Install a CUDA-enabled PyTorch build on a "
+                "Windows NVIDIA machine, or use --diarization-device cpu."
+            )
+        diar_device = "cuda"
+    else:
+        diar_device = "cpu"
+
+    LOG.info(
+        "PyTorch: %s | platform: %s %s | CUDA build: %s | CUDA available: %s",
+        torch.__version__,
+        platform.system(),
+        platform.machine(),
+        getattr(torch.version, "cuda", None) or "none",
+        torch_cuda_available,
+    )
+
+    if torch_cuda_available:
+        try:
+            LOG.info("PyTorch CUDA GPU: %s", torch.cuda.get_device_name(0))
+        except Exception:
+            pass
+
+    # Apple Silicon may expose PyTorch MPS, but pyannote's documented acceleration
+    # path is CUDA. Keep macOS on CPU for predictable cross-platform behavior.
+    if platform.system() == "Darwin":
+        try:
+            if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                LOG.info(
+                    "Apple MPS is available, but this script uses CPU for pyannote "
+                    "on macOS for compatibility."
+                )
+        except Exception:
+            pass
+
     if diar_device == "cuda":
         pipeline.to(torch.device("cuda"))
     LOG.info("Running speaker diarization on %s...", diar_device)
@@ -1150,7 +1195,7 @@ def main() -> int:
                 audio_path,
                 model_name=args.diarization_model,
                 hf_token=hf_token,
-                device=device,
+                diarization_device=args.diarization_device,
                 num_speakers=args.num_speakers,
                 min_speakers=args.min_speakers,
                 max_speakers=args.max_speakers,
@@ -1187,6 +1232,7 @@ def main() -> int:
             "word_timestamps": args.word_timestamps,
             "diarization": args.diarize,
             "diarization_model": args.diarization_model if args.diarize else None,
+            "diarization_device_requested": args.diarization_device if args.diarize else None,
             "num_speakers_detected": (
                 len({t["speaker"] for t in turns}) if turns else None
             ),
