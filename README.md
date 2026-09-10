@@ -1,6 +1,6 @@
 # KT Transcriber
 
-> **Status:** Testing — successfully tested on one real KT recording.
+> **Status:** Testing — native transcription successfully tested on one real KT recording. Docker packaging added and ready for Windows/NVIDIA and macOS testing.
 
 Local transcription for long technical Knowledge Transfer recordings.
 
@@ -15,6 +15,179 @@ For `session.mp4`, the default output folder contains:
 - `session.vtt` — WebVTT subtitles
 
 The temporary extracted FLAC is deleted unless `--keep-audio` is used.
+
+## Recommended setup: Docker
+
+> **Updating an existing checkout:** keep your current `.env` and customized
+> `technical_terms.txt`. The Docker setup uses those same files, so there is no
+> need to replace them when adding the Docker files.
+
+Docker is the simplest way to run KT Transcriber on another machine because Python,
+FFmpeg, faster-whisper, pyannote, and the relevant runtime dependencies are packaged
+inside the image.
+
+The project provides two Docker targets while keeping the same Python script:
+
+- **Windows + NVIDIA GPU:** `kt-transcriber:cuda`
+- **macOS:** `kt-transcriber:mac` (CPU)
+
+The original recordings are **not copied into the Docker image**. The local
+`recordings/` folder is mounted read-only and generated files are written to
+`transcripts/`.
+
+Hugging Face model downloads are stored in a persistent Docker volume, so models do
+not need to be downloaded again every time a container is recreated.
+
+### Docker prerequisites
+
+1. Install Docker Desktop.
+2. Copy `.env.example` to `.env` and add the Hugging Face token.
+3. Put recordings inside the project's `recordings/` folder.
+4. Run the Docker command from the project root.
+
+The token file remains ignored by Git.
+
+### Windows + NVIDIA
+
+Docker Desktop must use the WSL2 backend and the NVIDIA driver must support GPU access
+from WSL2 containers.
+
+Update WSL first:
+
+```powershell
+wsl --update
+```
+
+Verify that Docker can see the NVIDIA GPU:
+
+```powershell
+docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu24.04 nvidia-smi
+```
+
+Copy the environment template if this is the first run:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Put the recording in `recordings/`, for example:
+
+```text
+recordings/KT Session.mp4
+```
+
+Build and run the Windows/NVIDIA container:
+
+```powershell
+docker compose --profile windows run --rm --build transcriber-windows `
+  "/app/recordings/KT Session.mp4" `
+  --output-dir "/app/transcripts/KT Session" `
+  --terms /app/technical_terms.txt `
+  --diarize
+```
+
+Generated files will be available on the host at:
+
+```text
+transcripts/KT Session/
+```
+
+The Windows Docker image uses:
+
+- CUDA 12 + cuDNN runtime for faster-whisper/CTranslate2
+- PyTorch CUDA 13.0 for pyannote, including RTX 50-series / `sm_120` support
+- automatic CUDA architecture validation from the Python script
+
+To pass additional KT Transcriber options, append them to the command. For example:
+
+```powershell
+docker compose --profile windows run --rm --build transcriber-windows `
+  "/app/recordings/KT Session.mp4" `
+  --output-dir "/app/transcripts/KT Session" `
+  --terms /app/technical_terms.txt `
+  --diarize `
+  --num-speakers 3
+```
+
+### macOS
+
+The macOS Docker image runs the same transcription pipeline on CPU. The image builds
+for the Mac's native Docker architecture, including Apple Silicon, without NVIDIA or
+CUDA dependencies.
+
+Copy the environment template if this is the first run:
+
+```bash
+cp .env.example .env
+```
+
+Put the recording in `recordings/`, for example:
+
+```text
+recordings/KT Session.mp4
+```
+
+Build and run the macOS container:
+
+```bash
+docker compose --profile mac run --rm --build transcriber-mac \
+  "/app/recordings/KT Session.mp4" \
+  --output-dir "/app/transcripts/KT Session" \
+  --terms /app/technical_terms.txt \
+  --diarize
+```
+
+Generated files will be available on the host at:
+
+```text
+transcripts/KT Session/
+```
+
+> macOS Docker execution currently uses CPU. Docker Desktop does not expose Apple
+> Metal/MPS to this PyTorch/CTranslate2 pipeline in the same way the Windows WSL2
+> backend exposes NVIDIA CUDA.
+
+### Docker defaults and options
+
+The Docker images use the same defaults as the native Python script:
+
+```text
+large-v3
+English transcription
+VAD
+word timestamps
+automatic device selection
+```
+
+The Docker commands above additionally enable:
+
+```text
+technical_terms.txt hotwords
+speaker diarization
+```
+
+The first run takes longer because Docker must build the image and download the AI
+models. Subsequent runs reuse Docker build layers and the persistent Hugging Face model
+cache.
+
+### Docker files
+
+```text
+docker/
+├── Dockerfile.cuda
+└── Dockerfile.mac
+
+docker-compose.yml
+.dockerignore
+recordings/
+transcripts/
+```
+
+There are intentionally no launcher/wrapper scripts. Run the `docker compose` commands
+directly so the Docker configuration remains visible and easy to troubleshoot.
+
+The native Python setup below remains available for development, troubleshooting, or
+machines where Docker Desktop cannot be used.
 
 ## 1. Requirements
 
@@ -93,6 +266,8 @@ For Whisper/CTranslate2, the script automatically chooses:
 python kt_transcribe.py "recordings/KT-lambda.mp4" \
   --terms technical_terms.txt
 ```
+
+Technical vocabulary is passed to Whisper only through `hotwords`. The script intentionally does not use `initial_prompt`, because prompt text can leak into long-form transcripts.
 
 You can combine files and direct terms:
 

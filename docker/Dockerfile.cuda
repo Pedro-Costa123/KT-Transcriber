@@ -1,0 +1,37 @@
+# Windows + Docker Desktop + WSL2 + NVIDIA GPU
+#
+# faster-whisper / CTranslate2 currently needs CUDA 12 cuBLAS + cuDNN 9,
+# which this NVIDIA runtime image provides. pyannote uses the project's
+# PyTorch CUDA 13.0 wheel and can coexist with the CUDA 12 CTranslate2 runtime.
+FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/root/.cache/huggingface
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        ffmpeg \
+        libsndfile1 \
+        python3 \
+        python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt requirements-diarization.txt requirements-diarization-nvidia.txt ./
+
+# Keep this in one layer so the temporary CPU PyTorch wheel installed as a
+# pyannote dependency is removed before the image layer is committed.
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir -r requirements.txt \
+    && python3 -m pip install --no-cache-dir -r requirements-diarization.txt \
+    && python3 -m pip uninstall -y torch \
+    && python3 -m pip install --no-cache-dir -r requirements-diarization-nvidia.txt
+
+COPY kt_transcribe.py technical_terms.txt ./
+
+ENTRYPOINT ["python3", "/app/kt_transcribe.py"]

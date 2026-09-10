@@ -1,0 +1,34 @@
+name: kt-transcriber
+
+services:
+  transcriber-windows:
+    profiles: ["windows"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.cuda
+    image: kt-transcriber:cuda
+    env_file:
+      - .env
+    volumes:
+      - ./recordings:/app/recordings:ro
+      - ./transcripts:/app/transcripts
+      - ./technical_terms.txt:/app/technical_terms.txt:ro
+      - huggingface-cache:/root/.cache/huggingface
+    gpus: all
+
+  transcriber-mac:
+    profiles: ["mac"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mac
+    image: kt-transcriber:mac
+    env_file:
+      - .env
+    volumes:
+      - ./recordings:/app/recordings:ro
+      - ./transcripts:/app/transcripts
+      - ./technical_terms.txt:/app/technical_terms.txt:ro
+      - huggingface-cache:/root/.cache/huggingface
+
+volumes:
+  huggingface-cache:

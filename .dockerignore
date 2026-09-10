@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.DS_Store
+
+# Large user content must be mounted at runtime, never copied into images.
+recordings
+transcripts
+
+# Generated archives / local artifacts.
+*.zip
