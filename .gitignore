@@ -220,12 +220,13 @@ __marimo__/
 # Technical terms
 technical_terms.txt
 
-# Transcripts files (json, md, srt, txt, vtt)
+# Transcripts files (json, md, srt, txt, vtt, flac)
 transcripts/*/*.json
 transcripts/*/*.md
 transcripts/*/*.srt
 transcripts/*/*.txt
 transcripts/*/*.vtt
+transcripts/*/*.flac
 
 #MP4 / MKV / MOV files
 *.mp4

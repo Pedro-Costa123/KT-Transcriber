@@ -1,9 +1,10 @@
 # Windows + Docker Desktop + WSL2 + NVIDIA GPU
 #
-# faster-whisper / CTranslate2 currently needs CUDA 12 cuBLAS + cuDNN 9,
-# which this NVIDIA runtime image provides. pyannote uses the project's
-# PyTorch CUDA 13.0 wheel and can coexist with the CUDA 12 CTranslate2 runtime.
-FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
+# faster-whisper / CTranslate2 needs CUDA 12 cuBLAS + cuDNN 9.
+# CUDA 12.9.2 is used because RTX 50-series / Blackwell (sm_120) requires
+# CUDA 12.8 or newer. pyannote uses the project's PyTorch CUDA 13.0 wheel
+# and can coexist with the CUDA 12 CTranslate2 runtime.
+FROM nvidia/cuda:12.9.2-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \

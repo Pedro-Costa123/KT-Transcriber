@@ -94,7 +94,7 @@ transcripts/KT Session/
 
 The Windows Docker image uses:
 
-- CUDA 12 + cuDNN runtime for faster-whisper/CTranslate2
+- CUDA 12.9.2 + cuDNN runtime for faster-whisper/CTranslate2
 - PyTorch CUDA 13.0 for pyannote, including RTX 50-series / `sm_120` support
 - automatic CUDA architecture validation from the Python script
 
