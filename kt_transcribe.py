@@ -17,7 +17,6 @@ Python: 3.10+
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import gc
 import json
 import logging
@@ -29,7 +28,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -275,28 +274,6 @@ def build_hotwords(terms: list[str], max_chars: int = 2500) -> Optional[str]:
     return ", ".join(selected) if selected else None
 
 
-def build_initial_prompt(
-    user_prompt: Optional[str],
-    terms: list[str],
-    max_terms: int = 80,
-) -> Optional[str]:
-    parts: list[str] = []
-
-    if user_prompt:
-        parts.append(user_prompt.strip())
-
-    if terms:
-        short_terms = ", ".join(terms[:max_terms])
-        parts.append(
-            "This is a technical software-engineering knowledge-transfer session. "
-            "Preserve product names, service names, acronyms, API names, database "
-            f"names, cloud terminology, identifiers, and technical vocabulary. "
-            f"Known terms include: {short_terms}."
-        )
-
-    return " ".join(p for p in parts if p) or None
-
-
 # ---------------------------------------------------------------------------
 # Device / model configuration
 # ---------------------------------------------------------------------------
@@ -382,7 +359,6 @@ def perform_transcription(
     vad_min_silence_ms: int,
     condition_on_previous_text: bool,
     hotwords: Optional[str],
-    initial_prompt: Optional[str],
     cpu_threads: int,
     download_root: Optional[Path],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -417,7 +393,6 @@ def perform_transcription(
         "vad_filter": vad,
         "condition_on_previous_text": condition_on_previous_text,
         "hotwords": hotwords,
-        "initial_prompt": initial_prompt,
     }
 
     if vad:
@@ -1090,11 +1065,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Add one technical hotword directly; may be repeated",
     )
-    parser.add_argument(
-        "--initial-prompt",
-        default=None,
-        help="Extra context/hint text for Whisper",
-    )
 
     # Diarization
     parser.add_argument(
@@ -1205,7 +1175,6 @@ def main() -> int:
 
     terms = load_terms(args.terms, args.term)
     hotwords = build_hotwords(terms)
-    initial_prompt = build_initial_prompt(args.initial_prompt, terms)
 
     if terms:
         LOG.info("Loaded %d technical terms/hotwords.", len(terms))
@@ -1236,7 +1205,6 @@ def main() -> int:
             vad_min_silence_ms=args.vad_min_silence_ms,
             condition_on_previous_text=args.condition_on_previous_text,
             hotwords=hotwords,
-            initial_prompt=initial_prompt,
             cpu_threads=args.cpu_threads,
             download_root=args.download_root,
         )

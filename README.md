@@ -1,4 +1,6 @@
-# KT Transcriber - WORK IN PROGRESS - NOT FINISHED
+# KT Transcriber
+
+> **Status:** Testing — successfully tested on one real KT recording.
 
 Local transcription for long technical Knowledge Transfer recordings.
 
@@ -228,6 +230,7 @@ python kt_transcribe.py "recording.mp4" \
 
 ## Notes
 
+- Whisper uses technical terms only as `hotwords`; no generated `initial_prompt` is sent to the model.
 - `.env` is loaded automatically with `python-dotenv` from the directory containing `kt_transcribe.py`.
 - Pyannote acceleration is auto-detected independently: NVIDIA CUDA on supported Windows setups, CPU on macOS.
 - The original recording is never modified.
