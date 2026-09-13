@@ -1,6 +1,6 @@
 # KT Transcriber
 
-> **Status:** Testing — native transcription and Windows/NVIDIA Docker have been successfully tested on multiple real KT recordings. macOS Docker is still awaiting a real-world test.
+> **Status:** Tested - native transcription and Windows/NVIDIA Docker have been successfully tested on multiple real KT recordings. macOS Docker tested on docker arm64 in Windows WSL2.
 
 Local transcription for long technical Knowledge Transfer recordings.
 
