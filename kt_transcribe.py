@@ -6,7 +6,7 @@ Local-first long-form transcription for technical Knowledge Transfer recordings.
 
 Pipeline:
   media file -> FFmpeg 16 kHz mono FLAC -> faster-whisper -> optional pyannote
-  speaker diarization -> JSON / Markdown / TXT / SRT / VTT
+  speaker diarization -> JSON / raw Markdown / speaker Markdown / TXT / SRT / VTT
 
 Designed for large recordings (multi-hour MP4/MKV/MOV files) without uploading
 the original video to any external transcription service.
@@ -742,20 +742,105 @@ def append_text(existing: str, token: str) -> str:
     return (existing + token).strip()
 
 
+def _utterance_word_count(text: str) -> int:
+    """Count visible tokens conservatively for speaker-island smoothing."""
+    return len([part for part in text.strip().split() if part])
+
+
+def smooth_speaker_islands(
+    atomic: list[dict[str, Any]],
+    *,
+    max_words: int = 3,
+    max_duration_seconds: float = 1.5,
+    max_boundary_gap_seconds: float = 0.5,
+) -> int:
+    """
+    Reassign tiny diarization islands only when they are very likely artifacts.
+
+    A candidate must:
+      - be surrounded by the same speaker,
+      - be inside the same Whisper segment as both neighbours,
+      - contain at most ``max_words`` words,
+      - be short in time,
+      - have no meaningful pause at either boundary, and
+      - not end a sentence (., ?, !).
+
+    Keeping the same-Whisper-segment requirement is intentionally conservative:
+    short real replies such as "Yeah, yeah." that Whisper already separated into
+    their own segment are preserved.
+    """
+    smoothed = 0
+    if len(atomic) < 3:
+        return smoothed
+
+    # Work from a snapshot of speakers so one correction does not create a chain
+    # reaction that changes later eligibility within the same pass.
+    original_speakers = [item.get("speaker") for item in atomic]
+
+    for index in range(1, len(atomic) - 1):
+        previous = atomic[index - 1]
+        current = atomic[index]
+        following = atomic[index + 1]
+
+        previous_speaker = original_speakers[index - 1]
+        current_speaker = original_speakers[index]
+        following_speaker = original_speakers[index + 1]
+
+        if not previous_speaker or not current_speaker or not following_speaker:
+            continue
+        if previous_speaker != following_speaker:
+            continue
+        if current_speaker == previous_speaker:
+            continue
+
+        segment_index = current.get("_segment_index")
+        if segment_index is None:
+            continue
+        if previous.get("_segment_index") != segment_index:
+            continue
+        if following.get("_segment_index") != segment_index:
+            continue
+
+        text = current.get("text", "").strip()
+        if not text or text.endswith((".", "?", "!")):
+            continue
+        if _utterance_word_count(text) > max_words:
+            continue
+        if current["end"] - current["start"] > max_duration_seconds:
+            continue
+
+        left_gap = max(0.0, current["start"] - previous["end"])
+        right_gap = max(0.0, following["start"] - current["end"])
+        if left_gap > max_boundary_gap_seconds:
+            continue
+        if right_gap > max_boundary_gap_seconds:
+            continue
+
+        current["speaker"] = previous_speaker
+        smoothed += 1
+
+    return smoothed
+
+
 def build_utterances(
     segments: list[dict[str, Any]],
     diarization_enabled: bool,
     merge_gap_seconds: float = 1.2,
+    *,
+    smooth_speakers: bool = False,
+    smoothing_stats: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
     """
-    Build speaker-aware chunks.
+    Build readable chunks from Whisper segments.
 
-    If word timestamps exist, speaker changes can split a Whisper segment.
-    Otherwise each Whisper segment becomes an utterance.
+    With diarization disabled, this produces the clean Whisper reading view.
+    With diarization enabled, word-level speaker changes can split a Whisper
+    segment. Optional conservative smoothing removes only tiny speaker islands
+    that are bounded by the same speaker inside that exact Whisper segment.
     """
     atomic: list[dict[str, Any]] = []
 
-    for segment in segments:
+    for segment_index, segment in enumerate(segments):
         words = segment.get("words", [])
         if words:
             current: Optional[dict[str, Any]] = None
@@ -779,6 +864,7 @@ def build_utterances(
                         "end": word["end"],
                         "speaker": speaker,
                         "text": word["word"].strip(),
+                        "_segment_index": segment_index,
                     }
                 else:
                     current["end"] = word["end"]
@@ -797,7 +883,21 @@ def build_utterances(
                     or ("UNKNOWN" if diarization_enabled else None)
                 ),
                 "text": segment["text"].strip(),
+                "_segment_index": segment_index,
             })
+
+    islands_smoothed = 0
+    if diarization_enabled and smooth_speakers:
+        islands_smoothed = smooth_speaker_islands(atomic)
+        if islands_smoothed:
+            LOG.info(
+                "Speaker smoothing corrected %d short diarization island%s.",
+                islands_smoothed,
+                "" if islands_smoothed == 1 else "s",
+            )
+
+    if smoothing_stats is not None:
+        smoothing_stats["speaker_islands_smoothed"] = islands_smoothed
 
     # Merge adjacent chunks from the same speaker across Whisper segment borders.
     merged: list[dict[str, Any]] = []
@@ -805,20 +905,27 @@ def build_utterances(
         if not item["text"]:
             continue
 
+        public_item = {
+            "start": item["start"],
+            "end": item["end"],
+            "speaker": item.get("speaker"),
+            "text": item["text"],
+        }
+
         if (
             merged
-            and merged[-1]["speaker"] == item["speaker"]
-            and item["start"] - merged[-1]["end"] <= merge_gap_seconds
+            and merged[-1]["speaker"] == public_item["speaker"]
+            and public_item["start"] - merged[-1]["end"] <= merge_gap_seconds
         ):
-            merged[-1]["end"] = item["end"]
-            if item["text"]:
+            merged[-1]["end"] = public_item["end"]
+            if public_item["text"]:
                 merged[-1]["text"] = (
                     merged[-1]["text"].rstrip()
                     + " "
-                    + item["text"].lstrip()
+                    + public_item["text"].lstrip()
                 ).strip()
         else:
-            merged.append(item.copy())
+            merged.append(public_item)
 
     return merged
 
@@ -844,6 +951,10 @@ def write_markdown(
     path: Path,
     title: str,
     payload: dict[str, Any],
+    *,
+    utterances: list[dict[str, Any]],
+    speaker_headings: bool,
+    transcript_view: str,
 ) -> None:
     ensure_parent(path)
 
@@ -859,17 +970,18 @@ def write_markdown(
         f"- Language: `{meta.get('language') or 'auto/unknown'}`",
         f"- Duration: `{format_hms(meta.get('duration') or 0)}`",
         f"- Speaker diarization: `{'yes' if meta['diarization'] else 'no'}`",
+        f"- Transcript view: `{transcript_view}`",
         "",
         "## Transcript",
         "",
     ]
 
     last_speaker = object()
-    for item in payload["utterances"]:
+    for item in utterances:
         timestamp = format_hms(item["start"])
         speaker = item.get("speaker")
 
-        if speaker and speaker != last_speaker:
+        if speaker_headings and speaker and speaker != last_speaker:
             lines.append(f"### {speaker}")
             lines.append("")
 
@@ -933,7 +1045,16 @@ def write_outputs(
         if fmt == "json":
             write_json(path, payload)
         elif fmt == "md":
-            write_markdown(path, title, payload)
+            # Keep the normal Markdown as a clean Whisper reading view even
+            # when diarization was requested.
+            write_markdown(
+                path,
+                title,
+                payload,
+                utterances=payload["raw_utterances"],
+                speaker_headings=False,
+                transcript_view="raw Whisper",
+            )
         elif fmt == "txt":
             write_txt(path, payload["utterances"])
         elif fmt == "srt":
@@ -944,6 +1065,20 @@ def write_outputs(
             raise ValueError(f"Unsupported output format: {fmt}")
 
         written.append(path)
+
+    # When Markdown + diarization are enabled, add a companion speaker-aware
+    # Markdown instead of replacing the clean Whisper transcript.
+    if "md" in formats and payload["metadata"].get("diarization"):
+        speakers_path = out_dir / f"{stem}.speakers.md"
+        write_markdown(
+            speakers_path,
+            title,
+            payload,
+            utterances=payload["utterances"],
+            speaker_headings=True,
+            transcript_view="speaker-aware (smoothed)",
+        )
+        written.append(speakers_path)
 
     return written
 
@@ -1209,7 +1344,16 @@ def main() -> int:
             download_root=args.download_root,
         )
 
+        # Snapshot a clean reading view before speaker labels are assigned.
+        # This is the source for <stem>.md even when --diarize is enabled.
+        raw_utterances = build_utterances(
+            segments,
+            diarization_enabled=False,
+            merge_gap_seconds=args.merge_gap,
+        )
+
         turns: list[dict[str, Any]] = []
+        smoothing_stats: dict[str, Any] = {}
         if args.diarize:
             hf_token = os.getenv("HF_TOKEN")
             turns = diarize_audio(
@@ -1222,12 +1366,15 @@ def main() -> int:
                 max_speakers=args.max_speakers,
             )
             assign_speakers(segments, turns)
-
-        utterances = build_utterances(
-            segments,
-            diarization_enabled=args.diarize,
-            merge_gap_seconds=args.merge_gap,
-        )
+            utterances = build_utterances(
+                segments,
+                diarization_enabled=True,
+                merge_gap_seconds=args.merge_gap,
+                smooth_speakers=True,
+                smoothing_stats=smoothing_stats,
+            )
+        else:
+            utterances = raw_utterances
 
         elapsed = time.perf_counter() - started
 
@@ -1254,6 +1401,12 @@ def main() -> int:
             "diarization": args.diarize,
             "diarization_model": args.diarization_model if args.diarize else None,
             "diarization_device_requested": args.diarization_device if args.diarize else None,
+            "speaker_smoothing": bool(args.diarize),
+            "speaker_islands_smoothed": (
+                smoothing_stats.get("speaker_islands_smoothed", 0)
+                if args.diarize
+                else 0
+            ),
             "num_speakers_detected": (
                 len({t["speaker"] for t in turns}) if turns else None
             ),
@@ -1266,6 +1419,7 @@ def main() -> int:
             "technical_terms": terms,
             "segments": segments,
             "diarization_turns": turns,
+            "raw_utterances": raw_utterances,
             "utterances": utterances,
         }
 

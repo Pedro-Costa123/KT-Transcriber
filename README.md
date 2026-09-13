@@ -1,6 +1,6 @@
 # KT Transcriber
 
-> **Status:** Testing — native transcription successfully tested on one real KT recording. Docker packaging added and ready for Windows/NVIDIA and macOS testing.
+> **Status:** Testing — native transcription and Windows/NVIDIA Docker have been successfully tested on multiple real KT recordings. macOS Docker is still awaiting a real-world test.
 
 Local transcription for long technical Knowledge Transfer recordings.
 
@@ -8,13 +8,19 @@ Local transcription for long technical Knowledge Transfer recordings.
 
 For `session.mp4`, the default output folder contains:
 
-- `session.json` — lossless structured transcript, word timestamps, confidence data, speaker assignments and metadata
-- `session.md` — readable Markdown transcript
-- `session.txt` — plain text
-- `session.srt` — subtitles
-- `session.vtt` — WebVTT subtitles
+- `session.json` — canonical structured transcript with raw Whisper chunks, word timestamps, confidence data, diarization data, smoothed speaker assignments and metadata
+- `session.md` — clean readable Whisper transcript without speaker-boundary fragmentation
+- `session.speakers.md` — generated when `--diarize` is enabled; smoothed speaker-aware Markdown transcript
+- `session.txt` — plain text; includes speaker labels when diarization is enabled
+- `session.srt` — subtitles; includes speaker labels when diarization is enabled
+- `session.vtt` — WebVTT subtitles; includes speaker labels when diarization is enabled
 
 The temporary extracted FLAC is deleted unless `--keep-audio` is used.
+
+When `--diarize` is enabled, the regular `session.md` intentionally remains the clean
+Whisper reading view. Speaker attribution is written separately to
+`session.speakers.md`. This prevents short diarization boundaries from making the main
+transcript harder to read.
 
 ## Recommended setup: Docker
 
@@ -356,7 +362,27 @@ PyTorch wheel contains kernels for the detected GPU architecture. If CUDA can
 see the GPU but the wheel does not support its architecture, diarization safely
 falls back to CPU instead of failing later during a CUDA kernel launch.
 
-## 5. Useful presets
+## 5. Speaker-aware Markdown and smoothing
+
+When `--diarize` is enabled, the transcriber keeps two Markdown views:
+
+```text
+session.md           clean Whisper reading view
+session.speakers.md  speaker-aware view
+```
+
+The speaker-aware view applies conservative smoothing to obvious tiny diarization
+islands. A short fragment is reassigned only when it is surrounded by the same speaker
+**inside the same Whisper segment**, is at most three words / 1.5 seconds, has no
+meaningful pause at either boundary, and does not end a sentence. This is designed to
+fix artifacts such as one isolated word being assigned to a different speaker while
+preserving real short replies that Whisper already separated into their own segment.
+
+The JSON remains the canonical machine-readable output and contains both
+`raw_utterances` and the final speaker-aware `utterances`, plus a count of how many
+short speaker islands were smoothed.
+
+## 6. Useful presets
 
 ### Accuracy-focused technical KT
 
@@ -406,6 +432,7 @@ python kt_transcribe.py "recording.mp4" \
 ## Notes
 
 - Whisper uses technical terms only as `hotwords`; no generated `initial_prompt` is sent to the model.
+- With diarization enabled, `session.md` stays raw/readable and `session.speakers.md` contains the smoothed speaker-aware view.
 - `.env` is loaded automatically with `python-dotenv` from the directory containing `kt_transcribe.py`.
 - Pyannote acceleration is auto-detected independently: NVIDIA CUDA on supported Windows setups, CPU on macOS.
 - The original recording is never modified.
